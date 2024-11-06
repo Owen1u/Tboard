@@ -1,5 +1,7 @@
 # Mondo LLM
+Mondo Large Language Model
 
+Luke, 2024-11-06, AI Search Department
 
 
 ## Getting started
