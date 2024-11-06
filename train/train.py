@@ -28,27 +28,27 @@ from model import Transformer, ModelArgs
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from tinystories import Task
+from process import Task
 from export import model_export
+from torch.utils.tensorboard import SummaryWriter
 
 # -----------------------------------------------------------------------------
 # I/O
-out_dir = "out"
 eval_interval = 2000
 log_interval = 1
 eval_iters = 100
-eval_only = False               # if True, script exits right after the first eval
+eval_only = False  # if True, script exits right after the first eval
 always_save_checkpoint = False  # if True, always save a checkpoint after each eval
-init_from = "scratch"           # 'scratch' or 'resume'
+init_from = "scratch"  # 'scratch' or 'resume'
 # wandb logging
-wandb_log = False               # disabled by default
+wandb_log = False  # disabled by default
 wandb_project = "llamac"
 wandb_run_name = "run" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 # data
-batch_size = 128                # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 128  # if gradient_accumulation_steps > 1, this is the micro-batch size
 max_seq_len = 256
-vocab_source = "llama2"         # llama2 | custom; use Llama 2 vocab from Meta, or custom trained
-vocab_size = 32000              # the Llama 2 tokenizer has 32K tokens
+vocab_source = "transsion_wiki" # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
+vocab_size = 32000 # the Llama 2 tokenizer has 32K tokens
 # model
 dim = 288
 n_layers = 6
@@ -64,33 +64,29 @@ weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
+out_dir = f"transsion-d{dim}-len{max_seq_len}-lr{learning_rate}-ly{n_layers}-h{n_heads}"
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 1000  # how many steps to warm up for
+warmup_iters = 3000  # how many steps to warm up for
 # system
-device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-dtype = "bfloat16"  # float32 | bfloat16 | float16
+device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+dtype = "bfloat16"  # float32|bfloat16|float16
 compile = True  # use PyTorch 2.0 to compile the model to be faster
-
 # -----------------------------------------------------------------------------
-
+out_dir = os.path.join("out",out_dir)
+writer = SummaryWriter(os.path.join(out_dir,"log"))
 config_keys = [
     k
     for k, v in globals().items()
     if not k.startswith("_") and isinstance(v, (int, float, bool, str))
 ]
-exec(open("configurator.py").read())  # overrides from command line or config file
+exec(open("./train/configurator.py").read())  # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
-
 # -----------------------------------------------------------------------------
 
 # fixing some hyperparams to sensible defaults
 lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
 min_lr = 0.0  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-
-# validating checks
-assert vocab_source in ["llama2", "custom"]
-assert vocab_source == "custom" or vocab_size == 32000, "The vocab from Meta has 32K tokens"
 
 # various inits, derived attributes, I/O setup
 ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
@@ -156,9 +152,7 @@ model_args = dict(
     multiple_of=multiple_of,
     max_seq_len=max_seq_len,
     dropout=dropout,
-)
-
-# start with model_args from command line
+)  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -337,6 +331,9 @@ while True:
         print(
             f"{iter_num} | loss {lossf:.4f} | lr {lr:e} | {dt*1000:.2f}ms | mfu {running_mfu*100:.2f}%"
         )
+        writer.add_scalar("training loss",lossf,iter_num)
+        writer.add_scalar("lr",lr,iter_num)
+        writer.add_scalar("running_mfu",running_mfu,iter_num)
     iter_num += 1
     local_iter_num += 1
 
@@ -346,4 +343,5 @@ while True:
 
 if ddp:
     destroy_process_group()
-
+    
+writer.close()

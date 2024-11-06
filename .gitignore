@@ -2,6 +2,10 @@
 .vscode/
 .idea/
 
+data/
+out/
+tokenizer/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -183,3 +187,7 @@ prof
 virtualenv/
 cache/
 cache/
+
+
+!tokenizer/llama2.bin
+!tokenizer/llama2.model

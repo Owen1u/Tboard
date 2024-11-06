@@ -9,7 +9,7 @@ import torch
 from model import ModelArgs, Transformer
 from tokenizer import Tokenizer
 
-from tinystories import get_tokenizer_model_path
+from train.process import get_tokenizer_model_path
 
 # -----------------------------------------------------------------------------
 checkpoint = 'out/ckpt.pt'

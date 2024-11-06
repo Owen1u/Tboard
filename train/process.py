@@ -17,10 +17,11 @@ import sentencepiece as spm
 import torch
 import torch.distributed as dist
 from tqdm import tqdm
+import zipfile
 
 from tokenizer import Tokenizer
 
-DATA_CACHE_DIR = "data"
+DATA_CACHE_DIR = "data/"
 
 def download_file(url: str, fname: str, chunk_size=1024):
     """Helper function to download a file from a given url"""
@@ -38,13 +39,13 @@ def download_file(url: str, fname: str, chunk_size=1024):
             bar.update(size)
 
 
-def download():
-    """Downloads the TinyStories dataset to DATA_CACHE_DIR"""
+def download(hf_data,filename):
+    """Downloads the dataset to DATA_CACHE_DIR"""
     os.makedirs(DATA_CACHE_DIR, exist_ok=True)
 
     # download the TinyStories dataset, unless it's already downloaded
-    data_url = "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories_all_data.tar.gz"
-    data_filename = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data.tar.gz")
+    data_url = hf_data
+    data_filename = os.path.join(DATA_CACHE_DIR, f"{filename}.zip")
     if not os.path.exists(data_filename):
         print(f"Downloading {data_url} to {data_filename}...")
         download_file(data_url, data_filename)
@@ -52,23 +53,28 @@ def download():
         print(f"{data_filename} already exists, skipping download...")
 
     # unpack the tar.gz file into all the data shards (json files)
-    data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
+    data_dir = os.path.join(DATA_CACHE_DIR, filename)
     if not os.path.exists(data_dir):
         os.makedirs(data_dir, exist_ok=True)
         print(f"Unpacking {data_filename}...")
-        os.system(f"tar -xzf {data_filename} -C {data_dir}")
+        with zipfile.ZipFile(data_filename, 'r') as zip_ref:
+            zip_ref.extractall(data_dir)
     else:
         print(f"{data_dir} already exists, skipping unpacking...")
 
-    # print a single example just for debugging and such
-    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
+    # print a single example from a .jsonl file just for debugging and such
+    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.jsonl")))
     with open(shard_filenames[0], "r") as f:
-        data = json.load(f)
+        # Read the first line of the .jsonl file
+        first_line = f.readline()
+        data = json.loads(first_line)
+
     print("Download done.")
     print(f"Number of shards: {len(shard_filenames)}")
-    print(f"Example story:\n{data[0]}")
+    print(f"Example story:\n{data}")
 
-def train_vocab(vocab_size):
+
+def train_vocab(vocab_size,file_path):
     """
     Trains a custom sentencepiece tokenizer on the TinyStories dataset.
     The custom tokenizer files will be saved in DATA_CACHE_DIR/tok{N} directories,
@@ -77,30 +83,14 @@ def train_vocab(vocab_size):
     assert vocab_size > 0, "Vocab size must be positive"
 
     # output file prefix path for sentencepiece
-    prefix = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
+    prefix = os.path.join("tokenizer", f"tok{vocab_size}")
 
-    # how many shards we'll use for vocab training, kept low for efficiency
-    num_shards = 10
-
-    # 1) export a large chunk of text as a single text file tiny.txt
-    tiny_file = os.path.join(DATA_CACHE_DIR, "tiny.txt")
-    data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
-
-    print(f"Writing temporary file {tiny_file} with {num_shards} shards...")
-    with open(tiny_file, "w", encoding="utf-8") as of:
-        for shard in tqdm(shard_filenames[:num_shards]):
-            with open(shard, "r") as f:
-                data = json.load(f)
-            for example in data:
-                text = example["story"]
-                text = text.strip()
-                of.write(text + "\n")
-    print(f"Size is: {os.path.getsize(tiny_file) / 1024 / 1024:.2f} MB")
+    
+    print(f"Size is: {os.path.getsize(file_path) / 1024 / 1024:.2f} MB")
 
     # 2) train the sentencepiece model
     print("Will now train the vocab...")
-    spm.SentencePieceTrainer.train(input=tiny_file,
+    spm.SentencePieceTrainer.train(input=file_path,
                                    model_prefix=prefix,
                                    model_type="bpe",
                                    vocab_size=vocab_size,
@@ -114,61 +104,86 @@ def train_vocab(vocab_size):
                                    unk_surface=r" \342\201\207 ",
                                    normalization_rule_name="identity")
 
-    # 3) optional cleanup, ask the user if they'd like to delete tiny.txt
-    dec = input(f"Delete the temporary file {tiny_file}? [y/N] ")
-    if dec.lower() == "y":
-        os.remove(tiny_file)
-        print(f"Deleted {tiny_file}")
-
     print(f"Trained tokenizer is in {prefix}.model")
     print("Done.")
 
 
-def process_shard(args, vocab_size):
+def extract_text_from_sections(sections):
+    """
+    Extracts all text from sections -> has_parts -> value.
+    Skips sections that do not have the required structure.
+    """
+    all_text = []
+    for section in sections:
+        if 'has_parts' in section:
+            for part in section['has_parts']:
+                if 'value' in part:
+                    all_text.append(part['value'])
+                elif 'has_parts' in part:
+                    # If there are nested has_parts, we recursively check them
+                    all_text.extend(extract_text_from_sections([part]))
+    return all_text
+
+
+def process_shard(args, vocab_size,tokenizer_model):
     shard_id, shard = args
-    tokenizer_model = get_tokenizer_model_path(vocab_size)
+    tokenizer_model = tokenizer_model if vocab_size==0 else get_tokenizer_model_path(vocab_size)
     enc = Tokenizer(tokenizer_model)
-    with open(shard, "r") as f:
-        data = json.load(f)
     all_tokens = []
-    for example in tqdm(data, position=shard_id):
-        text = example["story"]
-        text = text.strip()  # get rid of leading/trailing whitespace
-        tokens = enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
-        all_tokens.extend(tokens)
-    # convert to uint16 nparray
+
+    with open(shard, "r") as f:
+        for line in f.readlines():
+            try:
+                # data = json.loads(line)
+
+                # if 'sections' in data:
+                #     # Extract text from sections
+                #     extracted_texts = extract_text_from_sections(data['sections'])
+                text = line.strip().lower()
+                    # for text in extracted_texts:
+                    #     text = text.strip()  # clean the text
+                tokens = enc.encode(text, bos=True, eos=False)  # tokenize
+                all_tokens.extend(tokens)
+
+            except json.JSONDecodeError:
+                print(f"Skipping malformed line in {shard}")
+
+    # Convert to uint16 numpy array
     all_tokens = np.array(all_tokens, dtype=np.uint16)
-    # calculate the output filename
+    
+    # Determine output file path
     if vocab_size == 0:
-        # if we're using Llama 2, just save the tokenized file in the same dir
-        tokenized_filename = shard.replace(".json", ".bin")
+        tokenized_filename = shard.replace(".txt", ".bin")
     else:
-        # save .bin files into a new tok{N} directory
         bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
         shard_basename = os.path.basename(shard)
-        bin_basename = shard_basename.replace(".json", ".bin")
+        bin_basename = shard_basename.replace(".txt", ".bin")
         tokenized_filename = os.path.join(bin_dir, bin_basename)
-    # write the bytes
+
+    # Write the bytes
     with open(tokenized_filename, "wb") as f:
         f.write(all_tokens.tobytes())
-    # calculate the average sequence length (they are separated by BOS=1)
+
+    # Calculate average sequence length
     avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
     print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
 
 
-def pretokenize(vocab_size):
-    # iterate the shards and tokenize all of them one by one
-    data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
+def pretokenize(vocab_size,dirname,tokenizer_model):
+    # Process all shards in the dataset
+    data_dir = os.path.join(DATA_CACHE_DIR, dirname)
+    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.txt")))
+    print(shard_filenames)
+
     if vocab_size > 0:
-        # .bin files will be saved into tok{N} directory, create it once here
         bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
         os.makedirs(bin_dir, exist_ok=True)
 
-    # process all the shards in a process pool
-    fun = partial(process_shard, vocab_size=vocab_size)
+    # Process shards in parallel
+    fun = partial(process_shard, vocab_size=vocab_size,tokenizer_model=tokenizer_model)
     with ProcessPoolExecutor() as executor:
         executor.map(fun, enumerate(shard_filenames))
+
     print("Done.")
 
 
@@ -192,14 +207,9 @@ class PretokDataset(torch.utils.data.IterableDataset):
         seed = 42 + worker_id + 1337 * rank
         rng = random.Random(seed)
         print(f"Created a PretokDataset with rng seed {seed}")
-        if self.vocab_source == "llama2":
-            # the .bin files are right along the .json files
-            bin_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-            shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
-        elif self.vocab_source == "custom":
-            # the .bin files are in tok{N} directory
-            bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}")
-            shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
+
+        bin_dir = os.path.join(DATA_CACHE_DIR, self.vocab_source)
+        shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
         # train/test split. let's use only shard 0 for test split, rest train
         shard_filenames = shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
         assert len(shard_filenames)>0, f"No bin files found in {bin_dir}"
@@ -237,7 +247,6 @@ def get_tokenizer_model_path(vocab_size):
         return os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}.model")
 
 class Task:
-
     @staticmethod
     def iter_batches(batch_size, device, num_workers=0, **dataset_kwargs):
         ds = PretokDataset(**dataset_kwargs)
@@ -251,6 +260,27 @@ class Task:
 
 # -----------------------------------------------------------------------------
 # CLI for constructing the dataset
+
+def split_txt(filename):
+    count=0
+    filepath = os.path.join(DATA_CACHE_DIR,filename)
+    basename = filename.split('.')[0]
+    dirname = os.path.join(DATA_CACHE_DIR,basename)
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
+
+    train = open(f"{dirname}/{basename}_train.txt","w", encoding="utf-8")
+    test = open(f"{dirname}/{basename}_test.txt","w",encoding="utf-8")
+
+    with open(filepath) as f:
+        for line in tqdm(f.readlines()):
+            count+=1
+            line = line.strip()
+            if count%10==0:
+                test.write(line+'\n')
+            else:
+                train.write(line+'\n')
+
 
 if __name__ == "__main__":
     """
@@ -266,16 +296,25 @@ if __name__ == "__main__":
     python tinystories.py pretokenize --vocab_size=2048
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("stage", type=str, choices=["download", "pretokenize", "train_vocab"])
+    parser.add_argument("stage", type=str, choices=["download", "pretokenize", "train_vocab","split"])
     parser.add_argument("--vocab_size", type=int, default=0, help="pretokenization vocab size. 0 = use Llama 2 tokenizer.")
+    parser.add_argument("--hf_data", type=str, default="", help="dataset path from huggingface.")
+    parser.add_argument("--filename", type=str, default="", help="filename of dataset.")
+    parser.add_argument("--tokenizer_model", type=str, default="tokenizer/llama2.model", help="tokenizer_model.")
     args = parser.parse_args()
 
     # depending on the stage call the appropriate function
     if args.stage == "download":
-        download()
+        assert args.hf_data and args.filename,"You must input huggingface url and filename"
+        download(args.hf_data,args.filename)
     elif args.stage == "train_vocab":
-        train_vocab(vocab_size=args.vocab_size)
+        assert args.filename
+        train_vocab(vocab_size=args.vocab_size,file_path=args.filename)
     elif args.stage == "pretokenize":
-        pretokenize(vocab_size=args.vocab_size)
+        assert args.filename and args.tokenizer_model
+        pretokenize(vocab_size=args.vocab_size,dirname=args.filename.split('.')[0],tokenizer_model=args.tokenizer_model)
+    elif args.stage == "split":
+        assert args.filename
+        split_txt(args.filename)
     else:
         raise ValueError(f"Unknown stage {args.stage}")

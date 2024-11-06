@@ -1,0 +1,1 @@
+python train/process.py split --filename transsion_wiki.txt

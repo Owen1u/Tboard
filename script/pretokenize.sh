@@ -1,0 +1,1 @@
+python train/process.py pretokenize --filename transsion_wiki --vocab_size 0 --tokenizer_model tokenizer/llama2.model

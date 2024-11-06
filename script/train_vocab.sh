@@ -1,0 +1,1 @@
+python train/process.py train_vocab --vocab_size 20000 --filename data/transsion_wiki.txt

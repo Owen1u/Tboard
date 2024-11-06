@@ -1,0 +1,1 @@
+python train/process.py download --hf_data https://huggingface.co/datasets/wikimedia/structured-wikipedia/resolve/main/20240916.en/enwiki_namespace_0.zip?download=true --filename enwiki
