@@ -2,8 +2,8 @@
 .vscode/
 .idea/
 
-data/
-out/
+data/*
+out/*
 tokenizer/*
 
 # Byte-compiled / optimized / DLL files
@@ -191,3 +191,5 @@ cache/
 
 !tokenizer/llama2.bin
 !tokenizer/llama2.model
+!tokenizer/core.txt
+!**/README.md

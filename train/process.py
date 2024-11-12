@@ -74,7 +74,7 @@ def download(hf_data,filename):
     print(f"Example story:\n{data}")
 
 
-def train_vocab(vocab_size,file_path):
+def train_vocab(vocab_size,file_path,defined_tokens):
     """
     Trains a custom sentencepiece tokenizer on the TinyStories dataset.
     The custom tokenizer files will be saved in DATA_CACHE_DIR/tok{N} directories,
@@ -102,7 +102,9 @@ def train_vocab(vocab_size,file_path):
                                    allow_whitespace_only_pieces=True,
                                    byte_fallback=True,
                                    unk_surface=r" \342\201\207 ",
-                                   normalization_rule_name="identity")
+                                   normalization_rule_name="identity",
+                                   user_defined_symbols=["helloworld"]
+                                   )
 
     print(f"Trained tokenizer is in {prefix}.model")
     print("Done.")
@@ -301,6 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--hf_data", type=str, default="", help="dataset path from huggingface.")
     parser.add_argument("--filename", type=str, default="", help="filename of dataset.")
     parser.add_argument("--tokenizer_model", type=str, default="tokenizer/llama2.model", help="tokenizer_model.")
+    parser.add_argument("--defined_tokens", type=str, default="", help="defined_tokens.")
     args = parser.parse_args()
 
     # depending on the stage call the appropriate function
@@ -309,7 +312,13 @@ if __name__ == "__main__":
         download(args.hf_data,args.filename)
     elif args.stage == "train_vocab":
         assert args.filename
-        train_vocab(vocab_size=args.vocab_size,file_path=args.filename)
+        if args.defined_tokens:
+            with open(args.defined_tokens) as defined_tokens_files:
+                defined_tokens = defined_tokens_files.readlines()
+                defined_tokens = [x.strip() for x in defined_tokens]
+        else:
+            defined_tokens=[""]
+        train_vocab(vocab_size=args.vocab_size,file_path=args.filename,defined_tokens=defined_tokens)
     elif args.stage == "pretokenize":
         assert args.filename and args.tokenizer_model
         pretokenize(vocab_size=args.vocab_size,dirname=args.filename.split('.')[0],tokenizer_model=args.tokenizer_model)
