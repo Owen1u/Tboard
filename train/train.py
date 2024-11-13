@@ -36,7 +36,7 @@ from torch.utils.tensorboard import SummaryWriter
 # I/O
 eval_interval = 2000
 log_interval = 1
-eval_iters = 100
+eval_iters = 800
 eval_only = False  # if True, script exits right after the first eval
 always_save_checkpoint = False  # if True, always save a checkpoint after each eval
 init_from = "scratch"  # 'scratch' or 'resume'
@@ -46,8 +46,8 @@ wandb_project = "llamac"
 wandb_run_name = "run" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 # data
 batch_size = 128  # if gradient_accumulation_steps > 1, this is the micro-batch size
-max_seq_len = 256
-vocab_source = "transsion_wiki" # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
+max_seq_len = 64
+vocab_source = "reddit-amazon-5m" # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
 vocab_size = 32000 # the Llama 2 tokenizer has 32K tokens
 # model
 dim = 288
@@ -58,18 +58,18 @@ multiple_of = 32
 dropout = 0.0
 # adamw optimizer
 gradient_accumulation_steps = 4  # used to simulate larger batch sizes
-learning_rate = 5e-4  # max learning rate
+learning_rate = 5e-5  # max learning rate
 max_iters = 100000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
-out_dir = f"transsion-d{dim}-len{max_seq_len}-lr{learning_rate}-ly{n_layers}-h{n_heads}"
+out_dir = f"transsion-vocab{vocab_size}-d{dim}-len{max_seq_len}-lr{learning_rate}-ly{n_layers}-h{n_heads}"
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 3000  # how many steps to warm up for
 # system
-device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16
 compile = True  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
