@@ -103,7 +103,7 @@ def train_vocab(vocab_size,file_path,defined_tokens):
                                    byte_fallback=True,
                                    unk_surface=r" \342\201\207 ",
                                    normalization_rule_name="identity",
-                                   user_defined_symbols=["helloworld"]
+                                   user_defined_symbols=defined_tokens
                                    )
 
     print(f"Trained tokenizer is in {prefix}.model")
@@ -315,7 +315,7 @@ if __name__ == "__main__":
         if args.defined_tokens:
             with open(args.defined_tokens) as defined_tokens_files:
                 defined_tokens = defined_tokens_files.readlines()
-                defined_tokens = [x.strip() for x in defined_tokens]
+                defined_tokens = [x.strip().lower() for x in defined_tokens]
         else:
             defined_tokens=[""]
         train_vocab(vocab_size=args.vocab_size,file_path=args.filename,defined_tokens=defined_tokens)

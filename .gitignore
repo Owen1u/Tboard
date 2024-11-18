@@ -186,10 +186,9 @@ docs/docs/templates
 prof
 virtualenv/
 cache/
-cache/
 
 
 !tokenizer/llama2.bin
 !tokenizer/llama2.model
-!tokenizer/core.txt
+!tokenizer/core_*.txt
 !**/README.md
