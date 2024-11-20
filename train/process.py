@@ -316,7 +316,8 @@ if __name__ == "__main__":
             with open(args.defined_tokens) as defined_tokens_files:
                 defined_tokens = defined_tokens_files.readlines()
                 defined_tokens = [x.strip().lower() for x in defined_tokens]
-                defined_tokens = ['▁'+x for x in defined_tokens]
+                # 请在核心词文件预处理阶段完成该操作
+                # defined_tokens = ['▁'+x for x in defined_tokens]
         else:
             defined_tokens=[""]
         train_vocab(vocab_size=args.vocab_size,file_path=args.filename,defined_tokens=defined_tokens)

@@ -367,6 +367,8 @@ float* forward(Transformer* transformer, int token, int pos) {
 typedef struct {
     char *str;
     int id;
+    // 此处分数应该随token排序，由于后续合并过程暂时不使用该分数，为避免影响内存，可以无视该错误。
+    // float score;
 } TokenIndex;
 
 typedef struct {
@@ -460,10 +462,16 @@ void encode(Tokenizer* t, char *text, int8_t bos, int8_t eos, int *tokens, int *
         for (int i = 0; i < t->vocab_size; i++) {
             t->sorted_vocab[i].str = t->vocab[i];
             t->sorted_vocab[i].id = i;
+            // 此处分数应该随token排序，由于后续合并过程暂时不使用该分数，为避免影响内存，可以无视该错误。
+            // t->sorted_vocab[i].score = t->vocab_scores[i];
         }
         qsort(t->sorted_vocab, t->vocab_size, sizeof(TokenIndex), compare_tokens);
     }
-
+    // for (int i = 0; i < t->vocab_size; i++) {
+    //     if(i<=26000){
+    //         printf("Token %d: str = %s, id = %d, score = %f\n", i, t->sorted_vocab[i].str, t->sorted_vocab[i].id,t->sorted_vocab[i].score);
+    //     }
+    // }
     // create a temporary buffer that will store merge candidates of always two consecutive tokens
     // *2 for concat, +1 for null terminator +2 for UTF8 (in case max_token_length is 1)
     char* str_buffer = malloc((t->max_token_length*2 +1 +2) * sizeof(char));
@@ -527,41 +535,67 @@ void encode(Tokenizer* t, char *text, int8_t bos, int8_t eos, int *tokens, int *
             // +3 is here because the first 3 vocab elements are <unk>, <s>, </s>
             // so the individual bytes only start at index 3
             for (int i=0; i < str_len; i++) {
-                tokens[(*n_tokens)++] = (unsigned char)str_buffer[i] + 3;
+                tokens[(*n_tokens)++] = (unsigned char)str_buffer[i] + str_lookup("<0x00>", t->sorted_vocab, t->vocab_size);
             }
         }
         str_len = 0; // protect against a sequence of stray UTF8 continuation bytes
     }
 
     // merge the best consecutive pair each iteration, according the scores in vocab_scores
-    while (1) {
-        float best_score = -1e10;
+    // while (1) {
+    //     float best_score = -1e10;
+    //     int best_id = -1;
+    //     int best_idx = -1;
+
+    //     for (int i=0; i < (*n_tokens-1); i++) {
+    //         // check if we can merge the pair (tokens[i], tokens[i+1])
+    //         sprintf(str_buffer, "%s%s", t->vocab[tokens[i]], t->vocab[tokens[i+1]]);
+    //         int id = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
+    //         if (id != -1 && t->sorted_vocab[id].score > best_score) {
+    //             // this merge pair exists in vocab! record its score and position
+    //             best_score = t->sorted_vocab[id].score;
+    //             best_id = id;
+    //             best_idx = i;
+    //         }
+    //     }
+
+    //     if (best_idx == -1) {
+    //         break; // we couldn't find any more pairs to merge, so we're done
+    //     }
+
+    //     // merge the consecutive pair (best_idx, best_idx+1) into new token best_id
+    //     tokens[best_idx] = best_id;
+    //     // delete token at position best_idx+1, shift the entire sequence back 1
+    //     for (int i = best_idx+1; i < (*n_tokens-1); i++) {
+    //         tokens[i] = tokens[i+1];
+    //     }
+    //     (*n_tokens)--; // token length decreased
+    // }
+    for (int i = 0; i < *n_tokens; i++) {
+        printf("tokens:%d ", tokens[i]);
+    }
+    int i=0;
+    while (i<(*n_tokens-1)){
+        sprintf(str_buffer, "%s%s", t->vocab[tokens[i]],"");
+        // str_buffer[str_len] = t->vocab[tokens[i]];
         int best_id = -1;
         int best_idx = -1;
-
-        for (int i=0; i < (*n_tokens-1); i++) {
-            // check if we can merge the pair (tokens[i], tokens[i+1])
-            sprintf(str_buffer, "%s%s", t->vocab[tokens[i]], t->vocab[tokens[i+1]]);
+        for (int j=i+1;j<*n_tokens;j++){
+            sprintf(str_buffer, "%s%s", str_buffer, t->vocab[tokens[j]]);
             int id = str_lookup(str_buffer, t->sorted_vocab, t->vocab_size);
-            if (id != -1 && t->vocab_scores[id] > best_score) {
-                // this merge pair exists in vocab! record its score and position
-                best_score = t->vocab_scores[id];
+            if (id!=-1){
                 best_id = id;
-                best_idx = i;
+                best_idx = j;
             }
         }
-
-        if (best_idx == -1) {
-            break; // we couldn't find any more pairs to merge, so we're done
+        if(best_id!=-1){
+            tokens[i] = best_id;
+            for (int k = i+1; k < (*n_tokens-best_idx+i); k++) {
+                tokens[k] = tokens[best_idx+k-i];
+            }
+            (*n_tokens)=(*n_tokens)-(best_idx-i);
         }
-
-        // merge the consecutive pair (best_idx, best_idx+1) into new token best_id
-        tokens[best_idx] = best_id;
-        // delete token at position best_idx+1, shift the entire sequence back 1
-        for (int i = best_idx+1; i < (*n_tokens-1); i++) {
-            tokens[i] = tokens[i+1];
-        }
-        (*n_tokens)--; // token length decreased
+        i++;
     }
 
     // add optional EOS (=2) token, if desired
@@ -734,6 +768,11 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     int num_prompt_tokens = 0;
     int* prompt_tokens = (int*)malloc((strlen(prompt)+3) * sizeof(int)); // +3 for '\0', ?BOS, ?EOS
     encode(tokenizer, prompt, 1, 0, prompt_tokens, &num_prompt_tokens);
+    // printf("\nNumber of prompt tokens: %d\n", num_prompt_tokens);
+    // for (int i = 0; i < num_prompt_tokens; ++i) {
+    //     printf("%d ", prompt_tokens[i]);
+    // }
+    // printf("\n");
     if (num_prompt_tokens < 1) {
         fprintf(stderr, "something is wrong, expected at least 1 prompt token\n");
         exit(EXIT_FAILURE);
