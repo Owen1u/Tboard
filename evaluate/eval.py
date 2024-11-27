@@ -1,10 +1,23 @@
 import sys
 sys.path.append('../train')
 import torch
+import numpy as np
 from functools import partial
 from contextlib import nullcontext
 from model import Transformer, ModelArgs
 from process import Task
+from tokenizer import Tokenizer
+from benchmark import Benchmark
+from metric import Hint
+
+tokenizer_model = "../tokenizer/tok32000-en.model"
+checkpoint="../out/ckpt.pt"
+core = "../tokenizer/core_en.txt"
+with open(core) as f:
+    corewords = f.readlines()
+corewords = [i.strip().replace('▁','').lower() for i in corewords if '▁' in i]
+test_dataset = Benchmark(path='benchmark_v1.txt')
+
 device='cpu'
 dtype = "bfloat16"
 vocab_source="benchmark"
@@ -28,44 +41,43 @@ model_args = dict(
     dropout=dropout,
 )  # start with model_args from command line
 
+
+checkpoint = torch.load(checkpoint,map_location=torch.device(device),weights_only=True)
+checkpoint_model_args = checkpoint["model_args"]
+for k in ["dim", "n_layers", "n_heads", "n_kv_heads", "vocab_size", "multiple_of", "max_seq_len"]:
+    model_args[k] = checkpoint_model_args[k]
 gptconf = ModelArgs(**model_args)
-model = Transformer(gptconf)
-checkpoint="/Users/luminjun/Documents/mondo/out/dada-en-vocab32000-d288-len64-lr5e-05-ly6-h6.bin"
+dada = Transformer(gptconf)
+state_dict = checkpoint["model"]
+unwanted_prefix = "_orig_mod."
+for k, v in list(state_dict.items()):
+    if k.startswith(unwanted_prefix):
+        state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+dada.load_state_dict(state_dict)
+dada.eval()
 
-model.load_state_dict(torch.load("/Users/luminjun/Documents/mondo/out/dada-en-vocab32000-d288-len64-lr5e-05-ly6-h6.bin"))
+hint = Hint(4)
+bad_cases=[]
 
-# model.load_state_dict(torch.load(checkpoint),strict=False)
-model.eval()
-model.to(device)
 
-# # compile the model
-# if compile:
-#     print("compiling the model... (takes a ~minute)")
-#     unoptimized_model = model
-#     model = torch.compile(model)  # requires PyTorch 2.0
+enc = Tokenizer(tokenizer_model)
+for data in test_dataset:
+    tokens = enc.encode(data, bos=True, eos=False)
+    tokens = np.array(tokens, dtype=np.uint16)
+    chunk = torch.from_numpy(tokens.astype(np.int64))
+    x = chunk[:-1].unsqueeze(0)
+    y = chunk[-1:]
+    _last_word = enc.decode(y.tolist())
+    if _last_word not in corewords:
+        hint.step()
+        continue
+    logits = dada(x).squeeze(0)
+    logits = torch.softmax(logits,dim=-1)
+    logit_v,logit_idx = logits.topk(4,dim=-1)
+    for gt,logit,idx in zip(y,logit_v,logit_idx):
+        correct = hint(gt,idx)
+        if not correct:
+            bad_cases.append(data)
 
-iter_batches = partial(
-    Task.iter_batches,
-    batch_size=1,
-    max_seq_len=max_seq_len,
-    vocab_size=vocab_size,
-    vocab_source=vocab_source,
-    device=device,
-    num_workers=0,
-)
-
-device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
-# note: float16 data type will automatically use a GradScaler
-ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
-ctx = (
-    nullcontext()
-    if device_type == "cpu"
-    else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
-)
-eval_iters = 10
-batch_iter = iter_batches(split="val")
-for k in range(eval_iters):
-    X, Y = next(batch_iter)
-    logits = model(X, Y)
-    print(logits)
+print(hint)
 
