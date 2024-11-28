@@ -1,9 +1,6 @@
 # Mondo LLM
 Mondo Large Language Model
 
-Luke, 2024-11-06, AI Search Department
-Minjun Lu, 2024-11-28, AI Search Department
-
 ## Dirs
 - `train`: training & data processing
 - `parse`: parsing raw files
