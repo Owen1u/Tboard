@@ -10,19 +10,18 @@ from tokenizer import Tokenizer
 from benchmark import Benchmark
 from metric import Hint
 
-tokenizer_model = "../tokenizer/tok32000-en.model"
-checkpoint="../out/ckpt.pt"
+tokenizer_model = "../tokenizer/tok50000-en-ha.model"
+checkpoint="../out/ckpt-en-ha.pt"
 core = "../tokenizer/core_en.txt"
 with open(core) as f:
     corewords = f.readlines()
 corewords = [i.strip().replace('▁','').lower() for i in corewords if '▁' in i]
-test_dataset = Benchmark(path='benchmark_v1.txt')
+test_dataset = Benchmark(path='benchmark_v2.txt')
 
 device='cpu'
 dtype = "bfloat16"
-vocab_source="benchmark"
 max_seq_len = 64
-vocab_size = 32000
+vocab_size = 50000
 dim = 288
 n_layers = 6
 n_heads = 6

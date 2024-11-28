@@ -190,7 +190,9 @@ cache/
 
 !tokenizer/llama2.bin
 !tokenizer/llama2.model
-!tokenizer/*-en.*
+!tokenizer/tok*.*
 !tokenizer/core_*.txt
-!out/dada-*.bin
+!out/dada-*.bi
 !**/README.md
+!data/*.py
+!data/**/*.py
