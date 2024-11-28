@@ -1,5 +1,5 @@
-# Mondo LLM
-Mondo Large Language Model
+# Tboard
+A LLM project for Android keyboard.
 
 ## Dirs
 - `train`: training & data processing
